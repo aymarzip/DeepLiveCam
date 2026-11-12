@@ -825,13 +825,12 @@ def _fast_paste_back(target_img: Frame, bgr_fake: np.ndarray, aimg: np.ndarray, 
         blended = (mask_t * fake_t + (1.0 - mask_t) * tgt_t).to(torch.uint8).cpu().numpy()
         target_img[y1p:y2p, x1p:x2p] = blended
     else:
-        # Fused uint8 blend via cv2 SIMD — no float32 round-trip.
-        # Measured ~7-8× faster than the old numpy float32 path on a 1000×1000 crop.
+        # Fused zero-allocation uint8 blend via cv2 SIMD — writes directly into target slice.
         alpha_3c = cv2.merge([alpha_crop, alpha_crop, alpha_crop])
-        inv_alpha = 255 - alpha_3c
-        a_fake = cv2.multiply(bgr_fake_crop, alpha_3c, scale=1.0 / 255.0)
-        a_tgt = cv2.multiply(target_crop, inv_alpha, scale=1.0 / 255.0)
-        target_img[y1p:y2p, x1p:x2p] = cv2.add(a_fake, a_tgt)
+        inv_alpha = cv2.bitwise_not(alpha_3c)
+        cv2.multiply(bgr_fake_crop, alpha_3c, scale=1.0 / 255.0, dst=alpha_3c)
+        cv2.multiply(target_crop, inv_alpha, scale=1.0 / 255.0, dst=inv_alpha)
+        cv2.add(alpha_3c, inv_alpha, dst=target_crop)
 
     return target_img
 
@@ -2189,6 +2188,3 @@ def apply_color_transfer(
 
     except Exception:
         return orig_src
-
-    except Exception:
-        return source

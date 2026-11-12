@@ -272,10 +272,12 @@ def apply_eyes_area(
         else:
             feathered.fill(0.0)
 
-        mask_3ch = feathered[:, :, np.newaxis]
-        inv_mask = 1.0 - mask_3ch
-        blended = resized_cutout.astype(np.float32) * mask_3ch + roi.astype(np.float32) * inv_mask
-        frame[min_y:max_y, min_x:max_x] = np.clip(blended, 0, 255).astype(np.uint8)
+        feathered_u8 = cv2.convertScaleAbs(feathered, alpha=255.0)
+        mask_3c = cv2.merge([feathered_u8, feathered_u8, feathered_u8])
+        inv_mask = cv2.bitwise_not(mask_3c)
+        cv2.multiply(resized_cutout, mask_3c, scale=1.0 / 255.0, dst=mask_3c)
+        cv2.multiply(roi, inv_mask, scale=1.0 / 255.0, dst=inv_mask)
+        cv2.add(mask_3c, inv_mask, dst=roi)
     except Exception:
         pass
 
@@ -491,10 +493,12 @@ def apply_eyebrows_area(
         else:
             feathered.fill(0.0)
 
-        mask_3ch = feathered[:, :, np.newaxis]
-        inv_mask = 1.0 - mask_3ch
-        blended = resized_cutout.astype(np.float32) * mask_3ch + roi.astype(np.float32) * inv_mask
-        frame[min_y:max_y, min_x:max_x] = np.clip(blended, 0, 255).astype(np.uint8)
+        feathered_u8 = cv2.convertScaleAbs(feathered, alpha=255.0)
+        mask_3c = cv2.merge([feathered_u8, feathered_u8, feathered_u8])
+        inv_mask = cv2.bitwise_not(mask_3c)
+        cv2.multiply(resized_cutout, mask_3c, scale=1.0 / 255.0, dst=mask_3c)
+        cv2.multiply(roi, inv_mask, scale=1.0 / 255.0, dst=inv_mask)
+        cv2.add(mask_3c, inv_mask, dst=roi)
     except Exception:
         pass
 
@@ -824,10 +828,12 @@ def apply_glasses_area(
         else:
             feathered.fill(0.0)
 
-        mask_3ch = feathered[:, :, np.newaxis]
-        inv_mask = 1.0 - mask_3ch
-        blended = resized_cutout.astype(np.float32) * mask_3ch + roi.astype(np.float32) * inv_mask
-        frame[min_y:max_y, min_x:max_x] = np.clip(blended, 0, 255).astype(np.uint8)
+        feathered_u8 = cv2.convertScaleAbs(feathered, alpha=255.0)
+        mask_3c = cv2.merge([feathered_u8, feathered_u8, feathered_u8])
+        inv_mask = cv2.bitwise_not(mask_3c)
+        cv2.multiply(resized_cutout, mask_3c, scale=1.0 / 255.0, dst=mask_3c)
+        cv2.multiply(roi, inv_mask, scale=1.0 / 255.0, dst=inv_mask)
+        cv2.add(mask_3c, inv_mask, dst=roi)
     except Exception:
         pass
 
@@ -974,10 +980,12 @@ def apply_bangs_area(
         else:
             feathered.fill(0.0)
 
-        mask_3ch = feathered[:, :, np.newaxis]
-        inv_mask = 1.0 - mask_3ch
-        blended = resized_cutout.astype(np.float32) * mask_3ch + roi.astype(np.float32) * inv_mask
-        frame[min_y:max_y, min_x:max_x] = np.clip(blended, 0, 255).astype(np.uint8)
+        feathered_u8 = cv2.convertScaleAbs(feathered, alpha=255.0)
+        mask_3c = cv2.merge([feathered_u8, feathered_u8, feathered_u8])
+        inv_mask = cv2.bitwise_not(mask_3c)
+        cv2.multiply(resized_cutout, mask_3c, scale=1.0 / 255.0, dst=mask_3c)
+        cv2.multiply(roi, inv_mask, scale=1.0 / 255.0, dst=inv_mask)
+        cv2.add(mask_3c, inv_mask, dst=roi)
     except Exception:
         pass
 

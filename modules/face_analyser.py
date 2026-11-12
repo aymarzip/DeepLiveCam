@@ -69,7 +69,15 @@ def get_face_analyser() -> Any:
                 sess_options.graph_optimization_level = (
                     onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
                 )
-                sess_options.enable_mem_pattern = False
+                is_dml = any(
+                    (p == 'DmlExecutionProvider' or (isinstance(p, tuple) and p[0] == 'DmlExecutionProvider'))
+                    for p in providers
+                )
+                if is_dml:
+                    sess_options.enable_mem_pattern = True
+                    sess_options.enable_cpu_mem_arena = True
+                else:
+                    sess_options.enable_mem_pattern = False
                 analyser = insightface.app.FaceAnalysis(
                     name='buffalo_l',
                     providers=providers,

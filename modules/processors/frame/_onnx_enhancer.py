@@ -124,7 +124,15 @@ def create_onnx_session(model_path: str) -> onnxruntime.InferenceSession:
     session_options.graph_optimization_level = (
         onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
     )
-    session_options.enable_mem_pattern = False
+    is_dml = any(
+        (p == 'DmlExecutionProvider' or (isinstance(p, tuple) and p[0] == 'DmlExecutionProvider'))
+        for p in providers
+    )
+    if is_dml:
+        session_options.enable_mem_pattern = True
+        session_options.enable_cpu_mem_arena = True
+    else:
+        session_options.enable_mem_pattern = False
     session = onnxruntime.InferenceSession(
         model_path, sess_options=session_options, providers=providers,
     )
@@ -153,8 +161,9 @@ def preprocess_face(face_img: np.ndarray, input_size: int) -> np.ndarray:
     """
     resized = cv2.resize(face_img, (input_size, input_size), interpolation=cv2.INTER_LINEAR)
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    blob = rgb.astype(np.float32) / 255.0 * 2.0 - 1.0
-    blob = np.transpose(blob, (2, 0, 1))[np.newaxis, ...]
+    blob = np.transpose(rgb, (2, 0, 1))[np.newaxis, ...].astype(np.float32)
+    blob *= (2.0 / 255.0)
+    blob -= 1.0
     return blob
 
 
