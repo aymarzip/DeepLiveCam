@@ -183,7 +183,12 @@ def _paste_back(
     full frame, and uses GPU for blending when available.
     """
     h, w = frame.shape[:2]
-    inv_matrix = cv2.invertAffineTransform(affine_matrix)
+    try:
+        inv_matrix = cv2.invertAffineTransform(affine_matrix)
+    except Exception:
+        return frame
+    if inv_matrix is None or getattr(inv_matrix, "shape", None) != (2, 3) or not np.all(np.isfinite(inv_matrix)):
+        return frame
 
     # Build or reuse cached feathered mask (uint8 — blended via cv2 SIMD ops)
     if _enhancer_cache['mask_size'] != output_size:
@@ -241,12 +246,12 @@ def _paste_back(
                    ).to(torch.uint8).cpu().numpy()
         frame[y1p:y2p, x1p:x2p] = blended
     else:
-        # Fused uint8 blend via cv2 SIMD — ~7× faster than the float32 round-trip.
+        # Fused zero-allocation uint8 blend via cv2 SIMD — writes directly into target slice.
         alpha_3c = cv2.merge([inv_mask_crop, inv_mask_crop, inv_mask_crop])
-        inv_alpha = 255 - alpha_3c
-        a_enh = cv2.multiply(inv_restored_crop, alpha_3c, scale=1.0 / 255.0)
-        a_tgt = cv2.multiply(target_crop, inv_alpha, scale=1.0 / 255.0)
-        frame[y1p:y2p, x1p:x2p] = cv2.add(a_enh, a_tgt)
+        inv_alpha = cv2.bitwise_not(alpha_3c)
+        cv2.multiply(inv_restored_crop, alpha_3c, scale=1.0 / 255.0, dst=alpha_3c)
+        cv2.multiply(target_crop, inv_alpha, scale=1.0 / 255.0, dst=inv_alpha)
+        cv2.add(alpha_3c, inv_alpha, dst=target_crop)
 
     return frame
 

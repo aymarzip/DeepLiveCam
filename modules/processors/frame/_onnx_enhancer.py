@@ -208,8 +208,33 @@ def _get_face_affine(face: Any, input_size: int):
     M = cv2.estimateAffinePartial2D(landmarks, template, method=cv2.LMEDS)[0]
     if M is None:
         return None, None
-    inv_M = cv2.invertAffineTransform(M)
+    try:
+        inv_M = cv2.invertAffineTransform(M)
+    except Exception:
+        return None, None
+    if inv_M is None or getattr(inv_M, "shape", None) != (2, 3) or not np.all(np.isfinite(inv_M)):
+        return None, None
     return M, inv_M
+
+
+_enhancer_mask_cache: dict = {}
+
+
+def _get_enhancer_mask(input_size: int) -> np.ndarray:
+    """Precompute and cache feathered uint8 edge mask for GPEN restoration space."""
+    if input_size in _enhancer_mask_cache:
+        return _enhancer_mask_cache[input_size]
+    mask = np.ones((input_size, input_size), dtype=np.float32)
+    border = max(1, input_size // 16)
+    ramp_up = np.linspace(0.0, 1.0, border, dtype=np.float32)
+    ramp_down = np.linspace(1.0, 0.0, border, dtype=np.float32)
+    mask[:border, :] *= ramp_up[:, None]
+    mask[-border:, :] *= ramp_down[:, None]
+    mask[:, :border] = np.minimum(mask[:, :border], ramp_up[None, :])
+    mask[:, -border:] = np.minimum(mask[:, -border:], ramp_down[None, :])
+    mask_u8 = (mask * 255.0).astype(np.uint8)
+    _enhancer_mask_cache[input_size] = mask_u8
+    return mask_u8
 
 
 def enhance_face_onnx(
@@ -234,25 +259,50 @@ def enhance_face_onnx(
         output = run_inference(session, input_name, blob)
     enhanced = postprocess_face(output)
 
-    # Create mask for blending (feathered edges)
-    mask = np.ones((input_size, input_size), dtype=np.float32)
-    border = max(1, input_size // 16)
-    mask[:border, :] = np.linspace(0, 1, border)[:, np.newaxis]
-    mask[-border:, :] = np.linspace(1, 0, border)[:, np.newaxis]
-    mask[:, :border] = np.minimum(mask[:, :border], np.linspace(0, 1, border)[np.newaxis, :])
-    mask[:, -border:] = np.minimum(mask[:, -border:], np.linspace(1, 0, border)[np.newaxis, :])
-
+    mask = _get_enhancer_mask(input_size)
     h, w = frame.shape[:2]
+
+    # Compute tight bbox around face in output coordinates to avoid full-frame warp
+    corners = np.array([
+        [0, 0], [input_size, 0],
+        [input_size, input_size], [0, input_size],
+    ], dtype=np.float32)
+    transformed = (inv_M[:, :2] @ corners.T).T + inv_M[:, 2]
+    x1 = max(0, int(np.floor(transformed[:, 0].min())))
+    x2 = min(w, int(np.ceil(transformed[:, 0].max())))
+    y1 = max(0, int(np.floor(transformed[:, 1].min())))
+    y2 = min(h, int(np.ceil(transformed[:, 1].max())))
+    if x1 >= x2 or y1 >= y2:
+        return frame
+
+    pad = max(1, input_size // 16) + 2
+    y1p, y2p = max(0, y1 - pad), min(h, y2 + pad)
+    x1p, x2p = max(0, x1 - pad), min(w, x2 + pad)
+    crop_w, crop_h = x2p - x1p, y2p - y1p
+    if crop_w <= 0 or crop_h <= 0:
+        return frame
+
+    inv_crop = inv_M.copy()
+    inv_crop[0, 2] -= x1p
+    inv_crop[1, 2] -= y1p
+
     warped_enhanced = cv2.warpAffine(
-        enhanced, inv_M, (w, h),
-        flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0),
+        enhanced, inv_crop, (crop_w, crop_h),
+        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0),
     )
     warped_mask = cv2.warpAffine(
-        mask, inv_M, (w, h),
-        flags=cv2.INTER_LINEAR, borderValue=0,
+        mask, inv_crop, (crop_w, crop_h),
+        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0,
     )
 
-    mask_3ch = warped_mask[:, :, np.newaxis]
-    result = (warped_enhanced.astype(np.float32) * mask_3ch +
-              frame.astype(np.float32) * (1.0 - mask_3ch))
-    return np.clip(result, 0, 255).astype(np.uint8)
+    target_crop = frame[y1p:y2p, x1p:x2p]
+    if target_crop.shape[:2] != (crop_h, crop_w):
+        return frame
+
+    # Zero-allocation SIMD uint8 blend directly into frame slice
+    alpha_3c = cv2.merge([warped_mask, warped_mask, warped_mask])
+    inv_alpha = cv2.bitwise_not(alpha_3c)
+    cv2.multiply(warped_enhanced, alpha_3c, scale=1.0 / 255.0, dst=alpha_3c)
+    cv2.multiply(target_crop, inv_alpha, scale=1.0 / 255.0, dst=inv_alpha)
+    cv2.add(alpha_3c, inv_alpha, dst=target_crop)
+    return frame
