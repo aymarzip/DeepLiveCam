@@ -354,6 +354,10 @@ def save_switch_states():
         "bangs_mask": getattr(modules.globals, "bangs_mask", False),
         "forehead_cutoff": getattr(modules.globals, "forehead_cutoff", 0.0),
         "show_bangs_mask_box": False,
+        "eyes_mask": getattr(modules.globals, "eyes_mask", False),
+        "eyes_mask_size": getattr(modules.globals, "eyes_mask_size", 0.0),
+        "show_eyes_mask_box": False,
+        "virtual_cam": getattr(modules.globals, "virtual_cam", False),
         "capture_resolution": list(modules.globals.capture_resolution),
         "det_size": modules.globals.det_size,
         "enable_interpolation": getattr(modules.globals, "enable_interpolation", False),
@@ -394,6 +398,10 @@ def load_switch_states():
         modules.globals.bangs_mask = state.get("bangs_mask", False)
         modules.globals.forehead_cutoff = float(state.get("forehead_cutoff", 0.0))
         modules.globals.show_bangs_mask_box = False
+        modules.globals.eyes_mask = state.get("eyes_mask", False)
+        modules.globals.eyes_mask_size = float(state.get("eyes_mask_size", 0.0))
+        modules.globals.show_eyes_mask_box = False
+        modules.globals.virtual_cam = state.get("virtual_cam", False)
         # Validate persisted camera settings before trusting them — a hand-
         # edited/corrupt file shouldn't push a bad size into cv2/insightface.
         res = state.get("capture_resolution")
@@ -661,6 +669,10 @@ class MainWindow(QMainWindow):
                                "Preserve original glasses frames and eye contours")
         self.sw_bangs = make("bangs_mask", "Bangs Protect",
                              "Preserve forehead hair and bangs from being overwritten")
+        self.sw_eyes = make("eyes_mask", "Eyes & Gaze Protect",
+                            "Preserve natural eye gaze, pupil movements, and blinking")
+        self.sw_vcam = make("virtual_cam", "Virtual Camera",
+                            "Stream live output directly to virtual webcam (Zoom, Discord, OBS)")
 
         # Map faces is special — closes mapper when toggled off.
         self.sw_map_faces = _Switch(_("Map faces"), modules.globals.map_faces,
@@ -674,6 +686,7 @@ class MainWindow(QMainWindow):
             self.sw_map_faces, self.sw_show_fps,
             self.sw_poisson, self.sw_color_fix,
             self.sw_glasses, self.sw_bangs,
+            self.sw_eyes, self.sw_vcam,
         ]
         for i, w in enumerate(items):
             grid.addWidget(w, i // 2, i % 2)
@@ -1236,6 +1249,9 @@ class _ProcessingWorker(QThread):
         cached_many_faces = None
         prev_raw_gray = None
 
+        from modules.virtual_cam import get_virtual_camera_manager
+        vcam_mgr = get_virtual_camera_manager()
+
         while not self._stop.is_set():
             try:
                 frame = self._cq.get(timeout=0.05)
@@ -1339,6 +1355,8 @@ class _ProcessingWorker(QThread):
                     or getattr(modules.globals, "glasses_mask_size", 0.0) > 0
                     or getattr(modules.globals, "bangs_mask", False)
                     or getattr(modules.globals, "forehead_cutoff", 0.0) > 0
+                    or getattr(modules.globals, "eyes_mask", False)
+                    or getattr(modules.globals, "eyes_mask_size", 0.0) > 0
                 )
                 if mask_needs_landmarks and cached_faces:
                     ensure_landmarks(temp_frame, cached_faces)
@@ -1415,6 +1433,22 @@ class _ProcessingWorker(QThread):
                     self._pq.put_nowait(temp_frame)
                 except queue.Full:
                     pass
+
+            if getattr(modules.globals, "virtual_cam", False):
+                if not vcam_mgr.is_active:
+                    fh, fw = temp_frame.shape[:2]
+                    vcam_mgr.start(
+                        fw,
+                        fh,
+                        self._fps or 30.0,
+                        getattr(modules.globals, "virtual_cam_backend", "auto"),
+                    )
+                vcam_mgr.send_frame(temp_frame)
+            elif vcam_mgr.is_active:
+                vcam_mgr.stop()
+
+        if vcam_mgr is not None and vcam_mgr.is_active:
+            vcam_mgr.stop()
 
 
 class WebcamPreviewWindow(QWidget):
@@ -1530,6 +1564,11 @@ class WebcamPreviewWindow(QWidget):
                 cap.release()
             except Exception:
                 pass
+        try:
+            from modules.virtual_cam import get_virtual_camera_manager
+            get_virtual_camera_manager().stop()
+        except Exception:
+            pass
         global _WEBCAM_PREVIEW
         if _WEBCAM_PREVIEW is self:
             _WEBCAM_PREVIEW = None

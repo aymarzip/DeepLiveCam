@@ -130,6 +130,8 @@ Perfect if you want the fastest setup with **zero manual installation**, pre-con
 
 ## Key Enhancements & Optimizations in this Fork
 
+- **Native Virtual Camera Output**: Stream live processed video directly to OBS Virtual Camera, UnityCapture, Zoom, Discord, Telegram, and browser meetings via `--virtual-cam` or UI switch without desktop capture hacks.
+- **Natural Eye-Gaze & Blink Preservation**: Occlusion-aware eye masking (`--eyes-mask`) preserving real-time pupil motion, eye contact, and natural blinking with zero edge artifacts.
 - **DirectML Hardware Acceleration**: Full DirectML execution provider support (`--execution-provider dml`) for Intel Arc, AMD Radeon, and NVIDIA GPUs on Windows. Includes concurrency locking and memory optimizations for zero GPU pipeline stalls.
 - **Glasses & Spectacles Preservation**: Occlusion-aware landmark masking preventing warping or cutoffs on eyeglasses.
 - **Bangs & Fringe Hair Protection**: Forehead boundary blending with soft alpha falloff that preserves hair bangs without artificial seams.

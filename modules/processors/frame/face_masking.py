@@ -127,85 +127,177 @@ def create_lower_mouth_mask(
 
     return mask, mouth_cutout, mouth_box, lower_lip_polygon
 
-def create_eyes_mask(face: Face, frame: Frame) -> (np.ndarray, np.ndarray, tuple, np.ndarray):
+def create_eyes_mask(
+    face: Face, frame: Frame
+) -> tuple:
+    """Create a feathered mask covering eye contours, eyelids, and pupils.
+
+    Preserves natural pupil direction, eye gaze, squinting, and natural blinking.
+    Returns:
+        (mask, eyes_cutout, (min_x, min_y, max_x, max_y), eyes_polygon)
+    """
+    if face is None or frame is None:
+        return np.zeros((1, 1), dtype=np.uint8), None, (0, 0, 0, 0), None
+
     mask = np.zeros(frame.shape[:2], dtype=np.uint8)
     eyes_cutout = None
-    landmarks = face.landmark_2d_106
-    if landmarks is not None:
-        # Left eye landmarks (87-96) and right eye landmarks (33-42)
-        left_eye = landmarks[87:96]
-        right_eye = landmarks[33:42]
-        
-        # Calculate centers and dimensions for each eye
-        left_eye_center = np.mean(left_eye, axis=0).astype(np.int32)
-        right_eye_center = np.mean(right_eye, axis=0).astype(np.int32)
-        
-        def get_eye_dimensions(eye_points):
-            x_coords = eye_points[:, 0]
-            y_coords = eye_points[:, 1]
-            down_size = getattr(modules.globals, "mask_down_size", 0.1)
-            eye_size = getattr(modules.globals, "eyes_mask_size", 0.0)
-            width = int((np.max(x_coords) - np.min(x_coords)) * (1 + down_size * eye_size))
-            height = int((np.max(y_coords) - np.min(y_coords)) * (1 + down_size * eye_size))
-            return width, height
-        
-        left_width, left_height = get_eye_dimensions(left_eye)
-        right_width, right_height = get_eye_dimensions(right_eye)
-        
-        # Add extra padding
-        padding = int(max(left_width, right_width) * 0.2)
-        
-        # Calculate bounding box for both eyes
-        min_x = min(left_eye_center[0] - left_width//2, right_eye_center[0] - right_width//2) - padding
-        max_x = max(left_eye_center[0] + left_width//2, right_eye_center[0] + right_width//2) + padding
-        min_y = min(left_eye_center[1] - left_height//2, right_eye_center[1] - right_height//2) - padding
-        max_y = max(left_eye_center[1] + left_height//2, right_eye_center[1] + right_height//2) + padding
-        
-        # Ensure coordinates are within frame bounds
-        min_x = max(0, min_x)
-        min_y = max(0, min_y)
-        max_x = min(frame.shape[1], max_x)
-        max_y = min(frame.shape[0], max_y)
-        
-        # Create mask for the eyes region
-        mask_roi = np.zeros((max_y - min_y, max_x - min_x), dtype=np.uint8)
-        
-        # Draw ellipses for both eyes
-        left_center = (left_eye_center[0] - min_x, left_eye_center[1] - min_y)
-        right_center = (right_eye_center[0] - min_x, right_eye_center[1] - min_y)
-        
-        # Calculate axes lengths (half of width and height)
-        left_axes = (left_width//2, left_height//2)
-        right_axes = (right_width//2, right_height//2)
-        
-        # Draw filled ellipses
-        cv2.ellipse(mask_roi, left_center, left_axes, 0, 0, 360, 255, -1)
-        cv2.ellipse(mask_roi, right_center, right_axes, 0, 0, 360, 255, -1)
-        
-        # Apply Gaussian blur to soften mask edges (GPU-accelerated when available)
-        mask_roi = gpu_gaussian_blur(mask_roi, (15, 15), 5)
-        
-        # Place the mask ROI in the full-sized mask
-        mask[min_y:max_y, min_x:max_x] = mask_roi
-        
-        # Extract the masked area from the frame
-        eyes_cutout = frame[min_y:max_y, min_x:max_x].copy()
-        
-        # Create polygon points for visualization
-        def create_ellipse_points(center, axes):
-            t = np.linspace(0, 2*np.pi, 32)
-            x = center[0] + axes[0] * np.cos(t)
-            y = center[1] + axes[1] * np.sin(t)
-            return np.column_stack((x, y)).astype(np.int32)
-        
-        # Generate points for both ellipses
-        left_points = create_ellipse_points((left_eye_center[0], left_eye_center[1]), (left_width//2, left_height//2))
-        right_points = create_ellipse_points((right_eye_center[0], right_eye_center[1]), (right_width//2, right_height//2))
-        
-        # Combine points for both eyes
-        eyes_polygon = np.vstack([left_points, right_points])
-        
-    return mask, eyes_cutout, (min_x, min_y, max_x, max_y), eyes_polygon
+    eyes_polygon = None
+    eyes_box = (0, 0, 0, 0)
+
+    eyes_mask_size = getattr(modules.globals, "eyes_mask_size", 0.0)
+    # Base expansion factor (1.18) covers eyelids and lashes;
+    # eyes_mask_size allows tuning up to 1.6x.
+    expansion_factor = 1.18 + (eyes_mask_size / 100.0) * 0.42
+
+    landmarks = getattr(face, "landmark_2d_106", None)
+    if landmarks is not None and isinstance(landmarks, np.ndarray) and landmarks.shape[0] >= 106:
+        # Right eye: 33-42, Left eye: 87-96
+        r_eye = landmarks[33:43].astype(np.float32)
+        l_eye = landmarks[87:97].astype(np.float32)
+
+        r_center = np.mean(r_eye, axis=0)
+        l_center = np.mean(l_eye, axis=0)
+
+        r_exp = r_center + (r_eye - r_center) * expansion_factor
+        l_exp = l_center + (l_eye - l_center) * expansion_factor
+
+        r_hull = cv2.convexHull(r_exp.astype(np.float32)).reshape(-1, 2)
+        l_hull = cv2.convexHull(l_exp.astype(np.float32)).reshape(-1, 2)
+        eyes_polygon = np.vstack([r_hull, l_hull]).astype(np.int32)
+
+        all_pts = np.vstack([r_exp, l_exp])
+        min_x = max(0, int(np.min(all_pts[:, 0])))
+        min_y = max(0, int(np.min(all_pts[:, 1])))
+        max_x = min(frame.shape[1], int(np.max(all_pts[:, 0])))
+        max_y = min(frame.shape[0], int(np.max(all_pts[:, 1])))
+
+    elif hasattr(face, "kps") and face.kps is not None and getattr(face.kps, "shape", None) == (5, 2):
+        # 5-point fallback
+        kps = face.kps.astype(np.float32)
+        eye_dist = max(10.0, float(np.linalg.norm(kps[1] - kps[0])))
+        rx = eye_dist * 0.28 * expansion_factor
+        ry = eye_dist * 0.20 * expansion_factor
+        t = np.linspace(0, 2 * np.pi, 24)
+        c0 = kps[0] # Right eye
+        pts0 = np.column_stack([c0[0] + rx * np.cos(t), c0[1] + ry * np.sin(t)])
+        c1 = kps[1] # Left eye
+        pts1 = np.column_stack([c1[0] + rx * np.cos(t), c1[1] + ry * np.sin(t)])
+        eyes_polygon = np.vstack([pts0, pts1]).astype(np.int32)
+
+        min_x = max(0, int(np.min(eyes_polygon[:, 0])))
+        min_y = max(0, int(np.min(eyes_polygon[:, 1])))
+        max_x = min(frame.shape[1], int(np.max(eyes_polygon[:, 0])))
+        max_y = min(frame.shape[0], int(np.max(eyes_polygon[:, 1])))
+    else:
+        return mask, None, (0, 0, 0, 0), None
+
+    if eyes_polygon is not None and len(eyes_polygon) >= 6:
+        # Extra padding around ROI for smooth feathering
+        pad_x = max(4, (max_x - min_x) // 10)
+        pad_y = max(4, (max_y - min_y) // 10)
+        min_x = max(0, min_x - pad_x)
+        min_y = max(0, min_y - pad_y)
+        max_x = min(frame.shape[1], max_x + pad_x)
+        max_y = min(frame.shape[0], max_y + pad_y)
+
+        if max_x > min_x and max_y > min_y:
+            mask_roi = np.zeros((max_y - min_y, max_x - min_x), dtype=np.uint8)
+            # Draw both eyes (either two hulls or two circles)
+            if landmarks is not None and landmarks.shape[0] >= 106:
+                r_rel = (r_hull - [min_x, min_y]).astype(np.int32)
+                l_rel = (l_hull - [min_x, min_y]).astype(np.int32)
+                cv2.fillPoly(mask_roi, [r_rel, l_rel], 255)
+            else:
+                pts0_rel = (pts0 - [min_x, min_y]).astype(np.int32)
+                pts1_rel = (pts1 - [min_x, min_y]).astype(np.int32)
+                cv2.fillPoly(mask_roi, [pts0_rel, pts1_rel], 255)
+
+            feather_k = max(3, (min(max_x - min_x, max_y - min_y) // 14) | 1)
+            mask_roi = gpu_gaussian_blur(mask_roi, (feather_k, feather_k), feather_k // 3)
+            mask[min_y:max_y, min_x:max_x] = mask_roi
+            eyes_cutout = frame[min_y:max_y, min_x:max_x].copy()
+            eyes_box = (min_x, min_y, max_x, max_y)
+
+    return mask, eyes_cutout, eyes_box, eyes_polygon
+
+
+def apply_eyes_area(
+    frame: np.ndarray,
+    eyes_cutout: np.ndarray,
+    eyes_box: tuple,
+    face_mask: np.ndarray,
+    eyes_polygon: np.ndarray,
+) -> np.ndarray:
+    """Blends natural eye gaze and eyelids seamlessly into the swapped frame."""
+    if frame is None or eyes_cutout is None or eyes_box is None or eyes_polygon is None:
+        return frame
+    if eyes_cutout.size == 0 or len(eyes_polygon) < 6:
+        return frame
+
+    try:
+        min_x, min_y, max_x, max_y = map(int, eyes_box)
+        frame_h, frame_w = frame.shape[:2]
+        min_x = max(0, min(frame_w, min_x))
+        min_y = max(0, min(frame_h, min_y))
+        max_x = max(0, min(frame_w, max_x))
+        max_y = max(0, min(frame_h, max_y))
+        box_w = max_x - min_x
+        box_h = max_y - min_y
+        if box_w <= 0 or box_h <= 0:
+            return frame
+
+        roi = frame[min_y:max_y, min_x:max_x]
+        if roi.size == 0:
+            return frame
+
+        if roi.shape[:2] != eyes_cutout.shape[:2]:
+            resized_cutout = gpu_resize(eyes_cutout, (box_w, box_h), interpolation=cv2.INTER_LINEAR)
+        else:
+            resized_cutout = eyes_cutout
+
+        # Build feathered alpha mask within the ROI
+        poly_mask = np.zeros(roi.shape[:2], dtype=np.uint8)
+        poly_rel = eyes_polygon - [min_x, min_y]
+        half = len(eyes_polygon) // 2
+        r_poly = poly_rel[:half].astype(np.int32)
+        l_poly = poly_rel[half:].astype(np.int32)
+        cv2.fillPoly(poly_mask, [r_poly, l_poly], 255)
+
+        feather_amount = max(1, min(16, min(box_w, box_h) // 10))
+        ksize = 2 * feather_amount + 1
+        feathered = cv2.GaussianBlur(poly_mask.astype(np.float32), (ksize, ksize), 0)
+        max_val = feathered.max()
+        if max_val > 1e-6:
+            feathered /= max_val
+        else:
+            feathered.fill(0.0)
+
+        mask_3ch = feathered[:, :, np.newaxis]
+        inv_mask = 1.0 - mask_3ch
+        blended = resized_cutout.astype(np.float32) * mask_3ch + roi.astype(np.float32) * inv_mask
+        frame[min_y:max_y, min_x:max_x] = np.clip(blended, 0, 255).astype(np.uint8)
+    except Exception:
+        pass
+
+    return frame
+
+
+def draw_eyes_mask_visualization(
+    frame: np.ndarray, face: Face, eyes_data: tuple
+) -> np.ndarray:
+    """Draws visualization polygon for eyes mask debugging."""
+    if frame is None or eyes_data is None:
+        return frame
+    _, _, eyes_box, eyes_polygon = eyes_data
+    if eyes_polygon is not None and len(eyes_polygon) >= 6:
+        vis_frame = frame.copy()
+        half = len(eyes_polygon) // 2
+        r_poly = eyes_polygon[:half].astype(np.int32)
+        l_poly = eyes_polygon[half:].astype(np.int32)
+        cv2.polylines(vis_frame, [r_poly], True, (0, 255, 255), 2)
+        cv2.polylines(vis_frame, [l_poly], True, (0, 255, 255), 2)
+        return vis_frame
+    return frame
 
 def create_curved_eyebrow(points):
     if len(points) >= 5:

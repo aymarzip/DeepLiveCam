@@ -44,6 +44,9 @@ live_resizable: bool = True
 camera_input_combobox: Any | None = None # Placeholder for UI element if needed
 webcam_preview_running: bool = False
 show_fps: bool = False
+virtual_cam: bool = False             # Stream live output to Virtual Camera
+virtual_cam_backend: str = "auto"     # Virtual Camera backend ('auto', 'obs', 'unitycapture')
+virtual_cam_fps: float = 30.0         # Target FPS for Virtual Camera stream
 
 # System Configuration
 max_memory: int | None = None        # Memory limit in GB? (Needs clarification)
@@ -73,6 +76,10 @@ eyes_mask_size: float = 0.0        # Eyes mask size (relative)
 glasses_mask: bool = False           # Enable glasses area masking/preservation
 show_glasses_mask_box: bool = False  # Visualize the glasses mask area (for debugging)
 glasses_mask_size: float = 0.0       # Glasses mask size (0-100; 0=off, 100=full glasses coverage)
+
+# Eyes & Gaze Mask Options (Blink & Gaze Preservation)
+eyes_mask: bool = False              # Enable natural eye gaze and blink preservation
+show_eyes_mask_box: bool = False     # Visualize the eye mask boundary (for debugging)
 
 # Bangs / Fringe Mask Options
 bangs_mask: bool = False             # Enable bangs/fringe hair preservation
