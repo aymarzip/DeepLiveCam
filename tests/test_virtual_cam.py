@@ -10,7 +10,6 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-import modules.globals
 from modules.virtual_cam import (
     VirtualCameraManager,
     get_virtual_camera_manager,

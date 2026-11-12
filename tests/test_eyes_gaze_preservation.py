@@ -12,7 +12,6 @@ import sys
 import unittest
 from unittest.mock import MagicMock
 import numpy as np
-import cv2
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
