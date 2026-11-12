@@ -80,6 +80,7 @@ class UIStudioLayoutTest(unittest.TestCase):
 
     def test_feature_protection_card_widgets(self):
         self.assertTrue(hasattr(self.window, "sw_eyes"))
+        self.assertTrue(hasattr(self.window, "sw_eyebrows"))
         self.assertTrue(hasattr(self.window, "sw_glasses"))
         self.assertTrue(hasattr(self.window, "sw_bangs"))
         self.assertTrue(hasattr(self.window, "sw_map_faces"))

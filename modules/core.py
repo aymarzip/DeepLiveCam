@@ -53,6 +53,8 @@ def create_program() -> argparse.ArgumentParser:
     program.add_argument('--glasses-mask', help='preserve glasses and eye contours', dest='glasses_mask', action='store_true', default=False)
     program.add_argument('--bangs-mask', help='preserve bangs and forehead hair', dest='bangs_mask', action='store_true', default=False)
     program.add_argument('--eyes-mask', help='preserve natural eye gaze and blinking', dest='eyes_mask', action='store_true', default=False)
+    program.add_argument('--eyebrows-mask', help='preserve natural eyebrows and brow expressions', dest='eyebrows_mask', action='store_true', default=False)
+    program.add_argument('--benchmark', '-b', help='enable detailed per-stage latency telemetry', dest='benchmark', action='store_true', default=False)
     program.add_argument('--virtual-cam', '--vcam', help='stream output to virtual camera', dest='virtual_cam', action='store_true', default=False)
     program.add_argument('--virtual-cam-backend', help='virtual camera backend (auto, obs, unitycapture)', dest='virtual_cam_backend', default='auto')
     program.add_argument('--forehead-cutoff', help='forehead cutoff percentage for hair preservation (0-100)', dest='forehead_cutoff', type=float, default=0.0)
@@ -94,6 +96,8 @@ def parse_args() -> None:
     modules.globals.glasses_mask = args.glasses_mask
     modules.globals.bangs_mask = args.bangs_mask
     modules.globals.eyes_mask = args.eyes_mask
+    modules.globals.eyebrows_mask = args.eyebrows_mask
+    modules.globals.benchmark = args.benchmark
     modules.globals.virtual_cam = args.virtual_cam
     modules.globals.virtual_cam_backend = args.virtual_cam_backend
     modules.globals.forehead_cutoff = args.forehead_cutoff

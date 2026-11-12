@@ -528,7 +528,16 @@ def get_face_swapper() -> Any:
                 sess_options.graph_optimization_level = (
                     onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
                 )
-                sess_options.enable_mem_pattern = False
+                is_dml = any(
+                    p == "DmlExecutionProvider" or
+                    (isinstance(p, tuple) and p[0] == "DmlExecutionProvider")
+                    for p in providers_config
+                )
+                if is_dml:
+                    sess_options.enable_mem_pattern = True
+                    sess_options.enable_cpu_mem_arena = True
+                else:
+                    sess_options.enable_mem_pattern = False
                 FACE_SWAPPER = insightface.model_zoo.get_model(
                     model_path,
                     providers=providers_config,
@@ -930,8 +939,9 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
     glasses_mask_enabled = getattr(modules.globals, "glasses_mask", False) or getattr(modules.globals, "glasses_mask_size", 0.0) > 0
     bangs_mask_enabled = getattr(modules.globals, "bangs_mask", False) or getattr(modules.globals, "forehead_cutoff", 0.0) > 0
     eyes_mask_enabled = getattr(modules.globals, "eyes_mask", False) or getattr(modules.globals, "eyes_mask_size", 0.0) > 0
+    eyebrows_mask_enabled = getattr(modules.globals, "eyebrows_mask", False)
     poisson_blend_enabled = getattr(modules.globals, "poisson_blend", False)
-    needs_original = opacity < 1.0 or mouth_mask_enabled or glasses_mask_enabled or bangs_mask_enabled or eyes_mask_enabled or poisson_blend_enabled
+    needs_original = opacity < 1.0 or mouth_mask_enabled or glasses_mask_enabled or bangs_mask_enabled or eyes_mask_enabled or eyebrows_mask_enabled or poisson_blend_enabled
     if needs_original:
         original_frame = temp_frame.copy()
     else:
@@ -1071,17 +1081,20 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
     # Now, work with the guaranteed uint8 'swapped_frame'
 
     # Ensure 106-point landmarks are computed if any feature mask is active
-    if (mouth_mask_enabled or glasses_mask_enabled or bangs_mask_enabled or eyes_mask_enabled) and getattr(target_face, "landmark_2d_106", None) is None:
+    if (mouth_mask_enabled or glasses_mask_enabled or bangs_mask_enabled or eyes_mask_enabled or eyebrows_mask_enabled) and getattr(target_face, "landmark_2d_106", None) is None:
         try:
             from modules.face_analyser import ensure_landmarks
             ensure_landmarks(original_frame, [target_face])
         except Exception:
             pass
 
-    if mouth_mask_enabled: # Check if mouth_mask is enabled
-        # Create a mask for the target face
-        face_mask = create_face_mask(target_face, original_frame) # Use original_frame for mask creation geometry
+    # Precompute shared face outline mask once if any feature mask needs it
+    shared_face_mask = None
+    if mouth_mask_enabled or glasses_mask_enabled or bangs_mask_enabled or eyes_mask_enabled or eyebrows_mask_enabled:
+        from modules.processors.frame.face_masking import create_face_mask
+        shared_face_mask = create_face_mask(target_face, original_frame)
 
+    if mouth_mask_enabled: # Check if mouth_mask is enabled
         # Create the mouth mask using the ORIGINAL frame (before swap) for cutout
         mouth_mask, mouth_cutout, mouth_box, lower_lip_polygon = (
             create_lower_mouth_mask(target_face, original_frame) # Use original_frame for real mouth cutout
@@ -1091,7 +1104,7 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
         if mouth_cutout is not None and mouth_box != (0,0,0,0):
             # Apply mouth area (from original) onto the 'swapped_frame'
             swapped_frame = apply_mouth_area(
-                swapped_frame, mouth_cutout, mouth_box, face_mask, lower_lip_polygon
+                swapped_frame, mouth_cutout, mouth_box, shared_face_mask, lower_lip_polygon
             )
 
             # Draw bounding box only while slider is being dragged
@@ -1112,7 +1125,6 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
 
     # --- Glasses Mask (Landmark-Guided Glasses Preservation) ---
     if glasses_mask_enabled:
-        face_mask = create_face_mask(target_face, original_frame)
         from modules.processors.frame.face_masking import (
             create_glasses_mask,
             apply_glasses_area,
@@ -1121,7 +1133,7 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
         g_mask, g_cutout, g_box, g_poly = create_glasses_mask(target_face, original_frame)
         if g_cutout is not None and g_box != (0, 0, 0, 0):
             swapped_frame = apply_glasses_area(
-                swapped_frame, g_cutout, g_box, face_mask, g_poly
+                swapped_frame, g_cutout, g_box, shared_face_mask, g_poly
             )
             if getattr(modules.globals, "show_glasses_mask_box", False):
                 g_data = (g_mask, g_cutout, g_box, g_poly)
@@ -1131,7 +1143,6 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
 
     # --- Bangs / Fringe Mask (Forehead Hair Preservation) ---
     if bangs_mask_enabled:
-        face_mask = create_face_mask(target_face, original_frame)
         from modules.processors.frame.face_masking import (
             create_bangs_mask,
             apply_bangs_area,
@@ -1140,7 +1151,7 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
         b_mask, b_cutout, b_box, b_poly = create_bangs_mask(target_face, original_frame)
         if b_cutout is not None and b_box != (0, 0, 0, 0):
             swapped_frame = apply_bangs_area(
-                swapped_frame, b_cutout, b_box, face_mask, b_poly
+                swapped_frame, b_cutout, b_box, shared_face_mask, b_poly
             )
             if getattr(modules.globals, "show_bangs_mask_box", False):
                 b_data = (b_mask, b_cutout, b_box, b_poly)
@@ -1148,9 +1159,26 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
                     swapped_frame, target_face, b_data
                 )
 
+    # --- Eyebrows & Brow Expression Mask (Natural Brow Movement Preservation) ---
+    if eyebrows_mask_enabled:
+        from modules.processors.frame.face_masking import (
+            create_eyebrows_mask,
+            apply_eyebrows_area,
+            draw_eyebrows_mask_visualization,
+        )
+        eb_mask, eb_cutout, eb_box, eb_poly = create_eyebrows_mask(target_face, original_frame)
+        if eb_cutout is not None and eb_box != (0, 0, 0, 0):
+            swapped_frame = apply_eyebrows_area(
+                swapped_frame, eb_cutout, eb_box, shared_face_mask, eb_poly
+            )
+            if getattr(modules.globals, "show_eyebrows_mask_box", False):
+                eb_data = (eb_mask, eb_cutout, eb_box, eb_poly)
+                swapped_frame = draw_eyebrows_mask_visualization(
+                    swapped_frame, target_face, eb_data
+                )
+
     # --- Eyes & Gaze Mask (Natural Pupil & Blink Preservation) ---
     if eyes_mask_enabled:
-        face_mask = create_face_mask(target_face, original_frame)
         from modules.processors.frame.face_masking import (
             create_eyes_mask,
             apply_eyes_area,
@@ -1159,7 +1187,7 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
         e_mask, e_cutout, e_box, e_poly = create_eyes_mask(target_face, original_frame)
         if e_cutout is not None and e_box != (0, 0, 0, 0):
             swapped_frame = apply_eyes_area(
-                swapped_frame, e_cutout, e_box, face_mask, e_poly
+                swapped_frame, e_cutout, e_box, shared_face_mask, e_poly
             )
             if getattr(modules.globals, "show_eyes_mask_box", False):
                 e_data = (e_mask, e_cutout, e_box, e_poly)

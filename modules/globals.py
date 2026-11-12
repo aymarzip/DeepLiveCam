@@ -82,6 +82,11 @@ glasses_mask_size: float = 0.0       # Glasses mask size (0-100; 0=off, 100=full
 eyes_mask: bool = False              # Enable natural eye gaze and blink preservation
 show_eyes_mask_box: bool = False     # Visualize the eye mask boundary (for debugging)
 
+# Eyebrows Mask Options (Brow & Expression Preservation)
+eyebrows_mask: bool = False          # Enable natural eyebrows and brow expression preservation
+show_eyebrows_mask_box: bool = False # Visualize the eyebrows mask boundary (for debugging)
+eyebrows_mask_size: float = 1.0      # Eyebrows mask size multiplier
+
 # Bangs / Fringe Mask Options
 bangs_mask: bool = False             # Enable bangs/fringe hair preservation
 show_bangs_mask_box: bool = False    # Visualize the bangs cutoff area (for debugging)
@@ -95,6 +100,9 @@ interpolation_weight: float = 0.5 # Blend weight for current frame (0.0-1.0). Lo
 # Swapper Cadence Tuning (1 = strict per-frame; 2-6 = accelerated real-time tracking)
 DEFAULT_SWAP_INTERVAL: int = 3
 swap_interval: int = DEFAULT_SWAP_INTERVAL
+
+# Benchmark & Profiling Telemetry
+benchmark: bool = False              # Enable detailed per-stage latency telemetry
 
 # Face detection resolution (160, 320, or 640).
 # Lower = faster detection, fewer FLOPs, less accurate at distance.

@@ -858,6 +858,8 @@ class MainWindow(QMainWindow):
                                     "Preserve forehead hair and bangs from being overwritten")
         self.sw_eyes = make_switch("eyes_mask", "Eyes & Gaze Protect",
                                    "Preserve natural eye gaze, pupil movements, and blinking")
+        self.sw_eyebrows = make_switch("eyebrows_mask", "Eyebrows Protect",
+                                       "Preserve natural live eyebrows and brow expressions")
         self.sw_vcam = make_switch("virtual_cam", "Virtual Camera",
                                    "Stream live output directly to virtual webcam (Zoom, Discord, OBS)")
         self.sw_map_faces = _Switch(_("Map faces"), modules.globals.map_faces,
@@ -1277,9 +1279,10 @@ class MainWindow(QMainWindow):
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(4)
         grid.addWidget(self.sw_eyes, 0, 0)
-        grid.addWidget(self.sw_glasses, 0, 1)
-        grid.addWidget(self.sw_bangs, 1, 0)
-        grid.addWidget(self.sw_map_faces, 1, 1)
+        grid.addWidget(self.sw_eyebrows, 0, 1)
+        grid.addWidget(self.sw_glasses, 1, 0)
+        grid.addWidget(self.sw_bangs, 1, 1)
+        grid.addWidget(self.sw_map_faces, 2, 0, 1, 2)
         layout.addLayout(grid)
 
         # Mouth mask slider row
@@ -1837,6 +1840,10 @@ class _ProcessingWorker(QThread):
             except queue.Empty:
                 continue
 
+            is_bench = getattr(modules.globals, "benchmark", False)
+            t_start = time.perf_counter() if is_bench else 0.0
+            t_det = t_start
+
             temp_frame = frame
             if modules.globals.live_mirror:
                 temp_frame = gpu_flip(temp_frame, 1)
@@ -1938,6 +1945,9 @@ class _ProcessingWorker(QThread):
                                 cached_target_face = None
                         cached_many_faces = None
 
+                if is_bench:
+                    t_det = time.perf_counter()
+
                 cached_faces = None
                 if cached_many_faces:
                     cached_faces = cached_many_faces
@@ -1956,6 +1966,7 @@ class _ProcessingWorker(QThread):
                     or getattr(modules.globals, "forehead_cutoff", 0.0) > 0
                     or getattr(modules.globals, "eyes_mask", False)
                     or getattr(modules.globals, "eyes_mask_size", 0.0) > 0
+                    or getattr(modules.globals, "eyebrows_mask", False)
                 )
                 if mask_needs_landmarks and cached_faces:
                     ensure_landmarks(temp_frame, cached_faces)
@@ -2010,6 +2021,13 @@ class _ProcessingWorker(QThread):
 
             current_time = time.time()
             frame_count += 1
+            if is_bench and frame_count % 15 == 0:
+                t_now = time.perf_counter()
+                total_ms = (t_now - t_start) * 1000.0
+                det_ms = (t_det - t_start) * 1000.0
+                proc_ms = (t_now - t_det) * 1000.0
+                print(f"[Benchmark] Frame: {total_ms:.1f}ms (Detect: {det_ms:.1f}ms | Process: {proc_ms:.1f}ms) | Rate: {fps:.1f} FPS")
+
             if current_time - prev_time >= fps_update_interval:
                 fps = frame_count / (current_time - prev_time)
                 frame_count = 0
