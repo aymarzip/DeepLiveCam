@@ -1,0 +1,56 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+tf_env/
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Caches and temporary files
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tmp/
+temp/
+*.log
+*.backup
+
+# Model weights and checkpoints (downloaded at runtime or manually)
+models/
+*.onnx
+*.pth
+*.pt
+*.bin
+*.weights
+
+# Local executables and binaries
+ffmpeg.exe
+ffmpeg
+*.exe
+
+# Archives
+*.zip
+*.tar.gz
+*.7z
+
+# Local runtime states
+switch_states.json
+
+# Batches: allow project runner scripts
+*.bat
+!run-cuda.bat
+!run-directml.bat
+
+# Allow images in media and fixtures
+!media/**
+!tests/fixtures/**
