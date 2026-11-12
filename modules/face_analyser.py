@@ -1,6 +1,7 @@
 import os
 import shutil
-from typing import Any
+from typing import Any, List, Optional
+import numpy as np
 import insightface
 import threading
 
@@ -441,3 +442,45 @@ def dump_faces(centroids: Any, frame_face_embeddings: list):
                     if temp_frame[int(y_min):int(y_max), int(x_min):int(x_max)].size > 0:
                         imwrite_unicode(temp_directory_path + f"/{i}/{frame['frame']}_{j}.png", temp_frame[int(y_min):int(y_max), int(x_min):int(x_max)])
                 j += 1
+
+
+def create_fused_face(image_paths: List[str]) -> Optional[Any]:
+    """Extracts and averages face embeddings from multiple source images.
+
+    Fuses multiple face angles and lighting conditions into a single
+    normalized L2 embedding vector for enhanced recognition and swap fidelity.
+    """
+    from insightface.app.common import Face
+    embeddings = []
+    first_face = None
+
+    for path in image_paths:
+        if not os.path.exists(path):
+            continue
+        frame = imread_unicode(path)
+        if frame is None:
+            continue
+        face = get_one_face(frame)
+        if face is not None and getattr(face, "normed_embedding", None) is not None:
+            embeddings.append(np.asarray(face.normed_embedding, dtype=np.float32))
+            if first_face is None:
+                first_face = face
+
+    if not embeddings or first_face is None:
+        return None
+
+    stacked = np.stack(embeddings, axis=0)
+    avg = np.mean(stacked, axis=0)
+    norm = float(np.linalg.norm(avg))
+    fused_emb = (avg / norm if norm > 1e-9 else avg).astype(np.float32)
+
+    fused_face = Face(
+        bbox=getattr(first_face, "bbox", np.array([0, 0, 128, 128], dtype=np.float32)),
+        kps=getattr(first_face, "kps", np.zeros((5, 2), dtype=np.float32)),
+        det_score=getattr(first_face, "det_score", 1.0),
+    )
+    fused_face.embedding = fused_emb
+    if hasattr(first_face, "landmark_2d_106") and first_face.landmark_2d_106 is not None:
+        fused_face.landmark_2d_106 = first_face.landmark_2d_106
+    return fused_face
+

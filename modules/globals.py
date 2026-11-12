@@ -22,6 +22,7 @@ simple_map: Dict[str, Any] = {}             # Stores simplified map (embeddings/
 source_path: str | None = None
 target_path: str | None = None
 output_path: str | None = None
+active_persona_face: Any | None = None  # Precomputed synthetic Face object from active persona
 
 # Processing Options
 frame_processors: List[str] = []

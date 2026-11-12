@@ -45,11 +45,13 @@ ffmpeg
 
 # Local runtime states
 switch_states.json
+personas/
 
 # Batches: allow project runner scripts
 *.bat
 !run-cuda.bat
 !run-directml.bat
+!run_studio.bat
 
 # Allow images in media and fixtures
 !media/**

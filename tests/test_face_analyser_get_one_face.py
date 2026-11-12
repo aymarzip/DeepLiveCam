@@ -116,6 +116,12 @@ class GetOneFaceTests(unittest.TestCase):
             sys.modules["modules.cluster_analysis"] = _orig_cluster
         else:
             sys.modules.pop("modules.cluster_analysis", None)
+        sys.modules.pop("modules.face_analyser", None)
+        try:
+            import importlib
+            importlib.import_module("modules.face_analyser")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

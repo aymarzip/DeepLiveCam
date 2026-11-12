@@ -38,11 +38,15 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
     QMainWindow,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -53,6 +57,7 @@ from PySide6.QtWidgets import (
 
 import modules.globals
 import modules.metadata
+from modules.persona_manager import Persona, PersonaManager
 from modules.capturer import get_video_frame, get_video_frame_total
 from modules.face_analyser import (
     add_blank_map,
@@ -326,6 +331,50 @@ QFrame#card {
     background-color: #161f2c;
     border: 1px solid #232d3d;
     border-radius: 10px;
+}
+
+QFrame#personaBar {
+    background-color: #131924;
+    border: 1px solid #1f2a3a;
+    border-radius: 10px;
+    padding: 4px 8px;
+}
+QFrame#personaSlot {
+    background-color: #1a2332;
+    border: 1px solid #28374a;
+    border-radius: 8px;
+    padding: 3px 6px;
+}
+QFrame#personaSlot:hover {
+    border-color: #0078d4;
+    background-color: #202c3f;
+}
+QFrame#personaSlotActive {
+    background-color: #17263c;
+    border: 2px solid #0078d4;
+    border-radius: 8px;
+    padding: 2px 5px;
+}
+QLabel#personaName {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: #e6edf3;
+}
+QLabel#personaHotkey {
+    background-color: #0078d4;
+    color: #ffffff;
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 7.5pt;
+    font-weight: 700;
+}
+QLabel#personaEmpty {
+    color: #8b949e;
+    font-size: 8pt;
+}
+QLabel#personaThumb {
+    border-radius: 16px;
+    background-color: #243042;
 }
 """
 
@@ -648,6 +697,108 @@ class _Switch(QWidget):
         self._checkbox.setChecked(value)
 
 
+class PersonaDialog(QDialog):
+    """Dialog to create a new Persona with multi-angle photo fusion."""
+
+    def __init__(self, parent=None, default_hotkey=""):
+        super().__init__(parent)
+        self.setWindowTitle(_("Create New Persona (Multi-Angle Fusion)"))
+        self.resize(460, 360)
+        self._image_paths = []
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        # Name row
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel(_("Persona Name:")))
+        self.txt_name = QLineEdit()
+        self.txt_name.setPlaceholderText(_("e.g. John Doe, Cyberpunk, Emma"))
+        name_row.addWidget(self.txt_name)
+        layout.addLayout(name_row)
+
+        # Hotkey row
+        hk_row = QHBoxLayout()
+        hk_row.addWidget(QLabel(_("Hotkey:")))
+        self.cb_hotkey = QComboBox()
+        self.cb_hotkey.addItems(["F1", "F2", "F3", "F4", "F5", "F6", "None"])
+        if default_hotkey in ["F1", "F2", "F3", "F4", "F5", "F6"]:
+            self.cb_hotkey.setCurrentText(default_hotkey)
+        hk_row.addWidget(self.cb_hotkey)
+        layout.addLayout(hk_row)
+
+        # Source photos
+        lbl_info = QLabel(_("Source Photos (Select 1 to 5 images for fusion):"))
+        lbl_info.setStyleSheet("font-weight: 600; color: #58a6ff;")
+        layout.addWidget(lbl_info)
+
+        lbl_hint = QLabel(_(
+            "💡 Tip: Select 2-5 photos from different angles (front, 45° left/right, different lighting)\n"
+            "to create a fused 512D ArcFace embedding with maximum similarity."
+        ))
+        lbl_hint.setStyleSheet("color: #8b949e; font-size: 8.5pt;")
+        layout.addWidget(lbl_hint)
+
+        self.list_photos = QListWidget()
+        self.list_photos.setStyleSheet("background-color: #121822; border: 1px solid #263345; border-radius: 6px;")
+        layout.addWidget(self.list_photos, 1)
+
+        btn_row = QHBoxLayout()
+        btn_add_photos = QPushButton("📁 " + _("Add Photos"))
+        btn_add_photos.clicked.connect(self._on_add_photos)
+        btn_clear_photos = QPushButton("🗑 " + _("Clear"))
+        btn_clear_photos.setObjectName("secondary")
+        btn_clear_photos.clicked.connect(self._on_clear_photos)
+        btn_row.addWidget(btn_add_photos)
+        btn_row.addWidget(btn_clear_photos)
+        layout.addLayout(btn_row)
+
+        # Dialog buttons
+        dialog_btns = QHBoxLayout()
+        self.btn_save = QPushButton("✓ " + _("Create Persona"))
+        self.btn_save.clicked.connect(self._on_save)
+        btn_cancel = QPushButton(_("Cancel"))
+        btn_cancel.setObjectName("secondary")
+        btn_cancel.clicked.connect(self.reject)
+        dialog_btns.addStretch(1)
+        dialog_btns.addWidget(btn_cancel)
+        dialog_btns.addWidget(self.btn_save)
+        layout.addLayout(dialog_btns)
+
+    def _on_add_photos(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, _("Select 1 to 5 Face Photos"), "", _IMAGE_FILE_FILTER
+        )
+        for p in paths:
+            if p not in self._image_paths and len(self._image_paths) < 5:
+                self._image_paths.append(p)
+                self.list_photos.addItem(f"{os.path.basename(p)} ({p})")
+
+    def _on_clear_photos(self):
+        self._image_paths.clear()
+        self.list_photos.clear()
+
+    def _on_save(self):
+        name = self.txt_name.text().strip()
+        if not name:
+            name = f"Persona {len(PersonaManager.get_instance().get_personas()) + 1}"
+        if not self._image_paths:
+            update_status("Please select at least 1 photo for the persona.")
+            return
+
+        hk = self.cb_hotkey.currentText()
+        if hk == "None":
+            hk = ""
+
+        update_status("Fusing multi-angle embeddings...")
+        persona = PersonaManager.get_instance().add_persona(name, self._image_paths, hk)
+        if persona is not None:
+            self.accept()
+        else:
+            update_status("Failed to create persona: no valid faces detected in photos.")
+
+
 def _get_provider_badge_text() -> str:
     providers = getattr(modules.globals, "execution_providers", [])
     for p in providers:
@@ -723,6 +874,9 @@ class MainWindow(QMainWindow):
         # Header
         layout.addLayout(self._build_header_row())
 
+        # Persona QuickBar
+        layout.addWidget(self._build_persona_bar())
+
         # 2-column studio layout
         studio_layout = QHBoxLayout()
         studio_layout.setSpacing(14)
@@ -786,6 +940,161 @@ class MainWindow(QMainWindow):
         row.addWidget(badge)
 
         return row
+
+    # ── persona quickbar ──────────────────────────────────────────────────
+
+    def _build_persona_bar(self) -> QWidget:
+        container = QFrame()
+        container.setObjectName("personaBar")
+        bar_layout = QHBoxLayout(container)
+        bar_layout.setContentsMargins(8, 4, 8, 4)
+        bar_layout.setSpacing(8)
+
+        lbl_title = QLabel(_("Personas:"))
+        lbl_title.setStyleSheet("font-weight: 700; color: #58a6ff; font-size: 8.5pt;")
+        bar_layout.addWidget(lbl_title)
+
+        self._persona_slots_layout = QHBoxLayout()
+        self._persona_slots_layout.setSpacing(6)
+        bar_layout.addLayout(self._persona_slots_layout, 1)
+
+        btn_add = QPushButton("+ " + _("New Persona"))
+        btn_add.setObjectName("secondary")
+        btn_add.setToolTip(_("Create persona with 1 to 5 multi-angle photos"))
+        btn_add.clicked.connect(lambda: self._on_create_persona_dialog())
+        bar_layout.addWidget(btn_add)
+
+        self._refresh_persona_bar()
+        return container
+
+    def _refresh_persona_bar(self) -> None:
+        if not hasattr(self, "_persona_slots_layout"):
+            return
+        while self._persona_slots_layout.count():
+            item = self._persona_slots_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        mgr = PersonaManager.get_instance()
+        personas = mgr.get_personas()
+        active_persona = mgr.get_active_persona()
+        active_id = active_persona.id if active_persona else None
+
+        slots_count = 6
+        for i in range(slots_count):
+            hotkey_label = f"F{i+1}"
+            p = next((x for x in personas if x.hotkey.upper() == hotkey_label), None)
+            if p is None and i < len(personas):
+                p = personas[i]
+
+            slot_frame = QFrame()
+            is_active = (p is not None and p.id == active_id)
+            slot_frame.setObjectName("personaSlotActive" if is_active else "personaSlot")
+            slot_frame.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            slot_layout = QHBoxLayout(slot_frame)
+            slot_layout.setContentsMargins(6, 2, 8, 2)
+            slot_layout.setSpacing(6)
+
+            if p is not None:
+                avatar = QLabel()
+                avatar.setObjectName("personaThumb")
+                avatar.setFixedSize(30, 30)
+                avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                if p.thumbnail_path and os.path.exists(p.thumbnail_path):
+                    avatar.setPixmap(render_image_preview(p.thumbnail_path, (30, 30)))
+                else:
+                    avatar.setText("👤")
+                slot_layout.addWidget(avatar)
+
+                info_col = QVBoxLayout()
+                info_col.setSpacing(0)
+                info_col.setContentsMargins(0, 0, 0, 0)
+                name_lbl = QLabel(p.name[:9])
+                name_lbl.setObjectName("personaName")
+                info_col.addWidget(name_lbl)
+
+                hk_lbl = QLabel(p.hotkey or hotkey_label)
+                hk_lbl.setObjectName("personaHotkey")
+                hk_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                info_col.addWidget(hk_lbl)
+                slot_layout.addLayout(info_col)
+
+                slot_frame.mousePressEvent = lambda _e, persona=p: self._activate_persona(persona)
+                slot_frame.setToolTip(f"{p.name} [{p.hotkey or hotkey_label}]\nRight-click for options")
+                slot_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                slot_frame.customContextMenuRequested.connect(
+                    lambda pos, persona=p, f=slot_frame: self._show_persona_context_menu(pos, persona, f)
+                )
+            else:
+                empty_lbl = QLabel(f"+ {hotkey_label}")
+                empty_lbl.setObjectName("personaEmpty")
+                empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                slot_layout.addWidget(empty_lbl)
+                slot_frame.mousePressEvent = lambda _e, hk=hotkey_label: self._on_create_persona_dialog(hk)
+                slot_frame.setToolTip(_(f"Assign persona to {hotkey_label} (Multi-angle photos)"))
+
+            self._persona_slots_layout.addWidget(slot_frame)
+
+    def _activate_persona(self, persona: Persona) -> None:
+        mgr = PersonaManager.get_instance()
+        mgr.set_active_persona(persona.id)
+        synthetic_face = mgr.build_synthetic_face(persona)
+        modules.globals.active_persona_face = synthetic_face
+        if persona.image_paths and os.path.exists(persona.image_paths[0]):
+            modules.globals.source_path = persona.image_paths[0]
+            self.source_label.setPixmap(
+                render_image_preview(
+                    persona.image_paths[0],
+                    (SOURCE_TARGET_PREVIEW_SIZE, SOURCE_TARGET_PREVIEW_SIZE),
+                )
+            )
+            self.source_label.setText("")
+        self._refresh_persona_bar()
+        update_status(_(f"Switched to Persona: {persona.name} [{persona.hotkey}]"))
+
+    def _activate_persona_by_hotkey(self, hotkey: str) -> None:
+        mgr = PersonaManager.get_instance()
+        persona = mgr.get_persona_by_hotkey(hotkey)
+        if persona is not None:
+            self._activate_persona(persona)
+        else:
+            update_status(f"No persona assigned to {hotkey}")
+
+    def _show_persona_context_menu(self, pos, persona: Persona, widget: QWidget) -> None:
+        menu = QMenu(widget)
+        act_activate = menu.addAction(_("Activate"))
+        act_delete = menu.addAction(_("Delete"))
+        chosen = menu.exec(widget.mapToGlobal(pos))
+        if chosen == act_activate:
+            self._activate_persona(persona)
+        elif chosen == act_delete:
+            PersonaManager.get_instance().delete_persona(persona.id)
+            if modules.globals.active_persona_face is not None:
+                modules.globals.active_persona_face = None
+            self._refresh_persona_bar()
+            update_status(_(f"Deleted persona {persona.name}"))
+
+    def _on_create_persona_dialog(self, default_hotkey: str = "") -> None:
+        dlg = PersonaDialog(self, default_hotkey=default_hotkey)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._refresh_persona_bar()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        f_keys = {
+            Qt.Key.Key_F1: "F1",
+            Qt.Key.Key_F2: "F2",
+            Qt.Key.Key_F3: "F3",
+            Qt.Key.Key_F4: "F4",
+            Qt.Key.Key_F5: "F5",
+            Qt.Key.Key_F6: "F6",
+        }
+        if key in f_keys:
+            self._activate_persona_by_hotkey(f_keys[key])
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # ── media card (left column) ─────────────────────────────────────────
 
@@ -1141,6 +1450,9 @@ class MainWindow(QMainWindow):
         )
         if path and is_image(path):
             modules.globals.source_path = path
+            modules.globals.active_persona_face = None
+            PersonaManager.get_instance().set_active_persona(None)
+            self._refresh_persona_bar()
             _RECENT_SOURCE_DIR = os.path.dirname(path)
             self.source_label.setPixmap(
                 render_image_preview(path, (SOURCE_TARGET_PREVIEW_SIZE, SOURCE_TARGET_PREVIEW_SIZE))
@@ -1150,6 +1462,9 @@ class MainWindow(QMainWindow):
             return
         else:
             modules.globals.source_path = None
+            modules.globals.active_persona_face = None
+            PersonaManager.get_instance().set_active_persona(None)
+            self._refresh_persona_bar()
             self.source_label.clear()
             self.source_label.setText(_("Source face"))
 
@@ -1230,6 +1545,9 @@ class MainWindow(QMainWindow):
         if not (sp and tp and is_image(sp) and is_image(tp)):
             return
         modules.globals.source_path, modules.globals.target_path = tp, sp
+        modules.globals.active_persona_face = None
+        PersonaManager.get_instance().set_active_persona(None)
+        self._refresh_persona_bar()
         _RECENT_SOURCE_DIR = os.path.dirname(tp)
         _RECENT_TARGET_DIR = os.path.dirname(sp)
         if _PREVIEW is not None:
@@ -1524,7 +1842,10 @@ class _ProcessingWorker(QThread):
                 temp_frame = gpu_flip(temp_frame, 1)
 
             if not modules.globals.map_faces:
-                if (
+                if modules.globals.active_persona_face is not None:
+                    source_image = modules.globals.active_persona_face
+                    last_source_path = None
+                elif (
                     modules.globals.source_path
                     and modules.globals.source_path != last_source_path
                 ):
@@ -1549,6 +1870,9 @@ class _ProcessingWorker(QThread):
                         last_source_path = modules.globals.source_path
                         reported_source_error = None
                         source_image = get_one_face(source_frame)
+                elif not modules.globals.source_path and modules.globals.active_persona_face is None:
+                    source_image = None
+                    last_source_path = None
 
                 should_detect = False
                 if modules.globals.many_faces:
@@ -1792,7 +2116,7 @@ class WebcamPreviewWindow(QWidget):
             # or when no source image is active, display the live camera capture
             # immediately so UI preview never freezes.
             if (not hasattr(self, "_last_rendered_frame") or self._last_rendered_frame is None
-                    or not modules.globals.source_path):
+                    or (not modules.globals.source_path and modules.globals.active_persona_face is None)):
                 bgr_frame = self._capture_worker.get_latest_frame()
                 if bgr_frame is not None and modules.globals.live_mirror:
                     bgr_frame = gpu_flip(bgr_frame, 1)
