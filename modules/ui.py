@@ -1507,6 +1507,8 @@ class _ProcessingWorker(QThread):
         cached_target_face = None
         cached_many_faces = None
         prev_raw_gray = None
+        missed_det_count = 0
+        MAX_MISSED_DET_FRAMES = 2
 
         from modules.virtual_cam import get_virtual_camera_manager
         vcam_mgr = get_virtual_camera_manager()
@@ -1592,10 +1594,24 @@ class _ProcessingWorker(QThread):
                 if should_detect:
                     frames_since_det = 0
                     if modules.globals.many_faces:
+                        new_many = detect_many_faces_fast(temp_frame)
+                        if new_many:
+                            cached_many_faces = new_many
+                            missed_det_count = 0
+                        else:
+                            missed_det_count += 1
+                            if missed_det_count > MAX_MISSED_DET_FRAMES:
+                                cached_many_faces = None
                         cached_target_face = None
-                        cached_many_faces = detect_many_faces_fast(temp_frame)
                     else:
-                        cached_target_face = detect_one_face_fast(temp_frame)
+                        new_face = detect_one_face_fast(temp_frame)
+                        if new_face is not None:
+                            cached_target_face = new_face
+                            missed_det_count = 0
+                        else:
+                            missed_det_count += 1
+                            if missed_det_count > MAX_MISSED_DET_FRAMES:
+                                cached_target_face = None
                         cached_many_faces = None
 
                 cached_faces = None

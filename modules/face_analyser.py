@@ -152,6 +152,8 @@ def _needs_landmark() -> bool:
         or getattr(modules.globals, "glasses_mask_size", 0.0) > 0
         or getattr(modules.globals, "bangs_mask", False)
         or getattr(modules.globals, "forehead_cutoff", 0.0) > 0
+        or getattr(modules.globals, "eyes_mask", False)
+        or getattr(modules.globals, "eyes_mask_size", 0.0) > 0
     ):
         return True
     processors = getattr(modules.globals, "frame_processors", [])

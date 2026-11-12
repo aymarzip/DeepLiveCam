@@ -764,7 +764,12 @@ def _fast_paste_back(target_img: Frame, bgr_fake: np.ndarray, aimg: np.ndarray, 
     # caches a single NxN template keyed by N, so fail loudly if that ever
     # stops being true rather than silently mis-warping the alpha mask.
     assert face_h == face_w, f"Expected square aligned face, got {face_h}x{face_w}"
-    IM = cv2.invertAffineTransform(M)
+    try:
+        IM = cv2.invertAffineTransform(M)
+    except Exception:
+        return target_img
+    if IM is None or getattr(IM, "shape", None) != (2, 3) or not np.all(np.isfinite(IM)):
+        return target_img
 
     # Bbox in output coords from the affine corners of the aligned-face square.
     corners = np.array(
